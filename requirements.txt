@@ -1,0 +1,13 @@
+beautifulsoup4==4.14.3
+pandas
+python-dotenv
+requests
+psycopg2
+gspread
+oauth2client
+SQLAlchemy
+pytest
+coverage
+
+# Optional / common extras (unpin if you need latest behavior)
+# certifi
