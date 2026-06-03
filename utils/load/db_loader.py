@@ -6,24 +6,19 @@ import psycopg2
 from psycopg2 import sql as psql
 
 def load_to_csv(df: pd.DataFrame, file_path: str = "products.csv") -> bool:
-    """
-    Menyimpan data ke format Flat File (CSV).
-    """
+    """Save DataFrame to a CSV file. Returns True on success."""
     try:
         df.to_csv(file_path, index=False)
-        print(f"[LOAD SUCCESS] Data berhasil disimpan ke CSV: {file_path}")
+        print(f"[LOAD SUCCESS] Data saved to CSV: {file_path}")
         return True
     except Exception as e:
-        print(f"[LOAD ERROR] Gagal menyimpan ke CSV: {e}")
+        print(f"[LOAD ERROR] Failed to save to CSV: {e}")
         return False
 
 def load_to_gsheets(df: pd.DataFrame, credentials_file: str, sheet_name: str) -> bool:
-    """
-    Menyimpan data ke Google Sheets menggunakan Service Account API.
-    Pastikan file credentials JSON sudah dilampirkan di folder submission.
-    """
+    """Upload DataFrame to Google Sheets using a Service Account. Returns True on success."""
     try:
-        # Menentukan scope untuk akses Google Drive dan Google Sheets
+        # Define the scope for Google Sheets and Drive API
         scope = [
             'https://spreadsheets.google.com/feeds',
             'https://www.googleapis.com/auth/drive'
@@ -33,26 +28,24 @@ def load_to_gsheets(df: pd.DataFrame, credentials_file: str, sheet_name: str) ->
         creds = ServiceAccountCredentials.from_json_keyfile_name(credentials_file, scope)
         client = gspread.authorize(creds)
         
-        # Membuka Spreadsheet berdasarkan nama file (pastikan Service Account email sudah di-invite sebagai Editor)
+        # Open the spreadsheet by name (ensure the Service Account email is invited as an Editor)
         sheet = client.open(sheet_name).sheet1
-        
-        # Bersihkan sheet sebelum diisi data baru
+
+        # Clear the sheet before inserting new data
         sheet.clear()
-        
-        # Masukkan header (nama kolom) dan isi datanya
+
+        # Insert header (column names) and the data rows
         data_to_upload = [df.columns.values.tolist()] + df.values.tolist()
         sheet.update(data_to_upload)
         
-        print(f"[LOAD SUCCESS] Data berhasil disimpan ke Google Sheets: {sheet_name}")
+        print(f"[LOAD SUCCESS] Data saved to Google Sheets: {sheet_name}")
         return True
     except Exception as e:
-        print(f"[LOAD ERROR] Gagal menyimpan ke Google Sheets: {e}")
+        print(f"[LOAD ERROR] Failed to save to Google Sheets: {e}")
         return False
 
 def load_to_postgres(df: pd.DataFrame, db_url: str, table_name: str = "fashion_products") -> bool:
-    """
-    Menyimpan data ke Database PostgreSQL.
-    """
+    """Insert DataFrame into PostgreSQL. Auto-create DB if it does not exist. Returns True on success."""
     def _ensure_database_exists(db_url: str):
         """Create the target database if it does not exist."""
         try:
@@ -74,41 +67,37 @@ def load_to_postgres(df: pd.DataFrame, db_url: str, table_name: str = "fashion_p
                 cur = conn.cursor()
                 try:
                     cur.execute(psql.SQL("CREATE DATABASE {};").format(psql.Identifier(target_db)))
-                    print(f"[LOAD INFO] Database '{target_db}' dibuat otomatis.")
+                    print(f"[LOAD INFO] Database '{target_db}' created automatically.")
                 finally:
                     cur.close()
                     conn.close()
         except Exception as e:
-            print(f"[LOAD ERROR] Gagal memastikan database ada: {e}")
+            print(f"[LOAD ERROR] Failed to ensure database exists: {e}")
             raise
 
     try:
         # Ensure DB exists (create if needed)
         _ensure_database_exists(db_url)
 
-        # Membuat koneksi engine menggunakan SQLAlchemy
+        # Create SQLAlchemy engine
         engine = create_engine(db_url)
 
-        # Push data ke tabel (jika tabel sudah ada, akan ditimpa/replace)
+        # Push data to the table (if table exists it will be replaced)
         df.to_sql(table_name, engine, if_exists='replace', index=False)
-        print(f"[LOAD SUCCESS] Data berhasil disimpan ke PostgreSQL (tabel: {table_name})")
+        print(f"[LOAD SUCCESS] Data saved to PostgreSQL (table: {table_name})")
         return True
     except sa_exc.OperationalError as oe:
-        print(f"[LOAD ERROR] Gagal menyimpan ke PostgreSQL (OperationalError): {oe}")
+        print(f"[LOAD ERROR] Failed to save to PostgreSQL (OperationalError): {oe}")
         return False
     except Exception as e:
-        print(f"[LOAD ERROR] Gagal menyimpan ke PostgreSQL: {e}")
+        print(f"[LOAD ERROR] Failed to save to PostgreSQL: {e}")
         return False
 
 def run_loading(data_or_path, gsheets_json: str, sheet_name: str, db_url: str):
-    """
-    Fungsi orkestrator untuk proses penyimpanan ke 3 repositori.
+    """Orchestrator for loading: save to CSV, GSheets, and PostgreSQL. Accepts DataFrame or CSV path."""
+    print("\n--- Starting Load Process (Target: Advanced) ---")
 
-    Parameter `data_or_path` dapat berupa `pandas.DataFrame` atau path ke CSV (str).
-    """
-    print("\n--- Memulai Proses Load (Target: Advanced) ---")
-
-    # Jika diberikan path string, coba baca CSV
+    # if data_or_path is a string, treat it as a CSV path; if it's a DataFrame, use it directly; otherwise, error
     df = None
     try:
         if isinstance(data_or_path, str):
@@ -116,21 +105,21 @@ def run_loading(data_or_path, gsheets_json: str, sheet_name: str, db_url: str):
         elif isinstance(data_or_path, pd.DataFrame):
             df = data_or_path
         else:
-            print("[LOAD ERROR] Parameter pertama harus path CSV atau pandas.DataFrame")
+            print("[LOAD ERROR] First parameter must be a CSV path or a pandas.DataFrame")
             return
     except Exception as e:
-        print(f"[LOAD ERROR] Gagal membaca input data: {e}")
+        print(f"[LOAD ERROR] Failed to read input data: {e}")
         return
 
     if df is None or df.empty:
-        print("Data kosong, proses Load dibatalkan.")
+        print("Empty data, load process canceled.")
         return
 
-    # 1. Load ke CSV
+    # 1. Load to CSV
     load_to_csv(df, "products.csv")
 
-    # 2. Load ke Google Sheets
+    # 2. Load to Google Sheets
     load_to_gsheets(df, gsheets_json, sheet_name)
 
-    # 3. Load ke PostgreSQL
+    # 3. Load to PostgreSQL
     load_to_postgres(df, db_url)
